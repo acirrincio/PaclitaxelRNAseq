@@ -8,30 +8,67 @@ library(EnhancedVolcano)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
-
 library(RColorBrewer)
+library(biomaRt)
+library(reshape2)
+library(ggplot2)
+library(viridis)
+library(plyr)
+library(dplyr)
+library(DESeq2)
+library(gplots)
+library("pheatmap")
+library("RColorBrewer")
+library(AnnotationDbi)
+library(org.Mm.eg.db)
+library(EnhancedVolcano)
+library(vidger)
+library(tidyr)
+library(apeglm)
+library(devtools)
+library(ComplexHeatmap)
+library(dendextend)
+library(openxlsx)
+library(LSD)
+library(biomaRt)
+library(PoiClaClu)
+library(ggpubr)
+library(tidyverse)
+library(rstatix)
+library(ggpubr)
 
 
 
-setwd("/Users/anthony/Desktop/RNAseq/BenSandra RNAseq/Code&Data&Figures/DRG/")
+setwd("/Users/anthony/Desktop/RNAseq/BenSandra RNAseq/Code&Data&Figures/DRG/Count_matrix_original_and_updated/")
 #reading in count matrix
-countMatrix<- readRDS("countMatrix.rds")
-#read in sample info
+#countMatrixXXXXX<- readRDS("countMatrix.rds") ####this was for old count matrix 
+#head(countMatrixXXXXX)
+file = ("~/Desktop/RNAseq/BenSandra RNAseq/Code&Data&Figures/DRG/Count_matrix_original_and_updated/DRG_CountMatrix_lanesCollated_woPairedReads.txt")
+countMatrix <- read.table(file)
 View(countMatrix)
+#read in sample info
+setwd("/Users/anthony/Desktop/RNAseq/BenSandra RNAseq/Code&Data&Figures/DRG/")
+
+
 sampleinfo <- read.csv("sampleLookup.txt", sep = "\t", header = TRUE)
+View(sampleinfo)
 sampleinfo <- sampleinfo[65:128,] #getting rid of all the skin info
+View(sampleinfo)
 samplematch <- read.xlsx("sampleMatchup.xlsx",colNames = FALSE)
+View(samplematch)
+
 
 
 #trim off numbers to make columns match
 colnames <- colnames(countMatrix)
 View(colnames)
-sampleinfo$col <- gsub('201926', '', sampleinfo$HIHG_ID)
+sampleinfo$col <- gsub('201926', 'X201926', sampleinfo$HIHG_ID)
 sampleinfo$col2 <- gsub('-01', '', sampleinfo$col)
 sampleinfo$id <- gsub('[0-9]+-','', sampleinfo$External_ID)
 sampleinfo$id2 <- gsub('R-','', sampleinfo$id)
 sampleinfo$id3 <- sampleinfo$id2
 View(sampleinfo)
+
 #fixing sample match
 
 samplematch$id <- gsub('[0-9]+ - ','',samplematch$X1)
@@ -78,8 +115,15 @@ colData$column = NULL
 rownames(colData) = colData$`sample name`
 View(colData)
 
+#changing timepoint to number only....i.e. 'd.4' format to '4 
+
+colData$timepoint <-gsub('d.','',colData$timepoint)
+
+View(colData)
+
 #Arrange columns in numerical order in countMatrix
 colnames(countMatrix)
+
 #countMatrix2 has the DRG names in order 
 
 countMatrix2 <- countMatrix[,order(colnames(countMatrix))]
@@ -92,9 +136,77 @@ View(colData)
 View(countMatrix2)
 
 
+#need to remove the rows for # of mapped reads, multimapping, etc
+row.names.remove <- c("N_multimapping", "N_noFeature","N_unmapped","N_ambiguous")
+countMatrix2 <- countMatrix2[!(row.names(countMatrix2) %in% row.names.remove), ]
+View(countMatrix2)
+
+
+#converting the rownames to gene names 
+###########################
+###########################
+###########################
+###########################
+
+#making a column name from the row names 
+
+countMatrix2$ensembl_gene_id <- rownames(countMatrix2)
+
+
+#now we have our huge dataFrame 
+#first i will convert the ensembl names to gene symbols before proceeding 
+
+
+##
+##changing the gene names to gene symbols
+##(here are the setps taken to get to the code below)
+#ensembl <- useEnsembl(biomart = "genes")
+#datasets <- listDatasets(ensembl)
+#View(datasets)
+
+ensembl <- useEnsembl(biomart = "genes", dataset = "mmusculus_gene_ensembl")
+
+#finding filters
+#filters = listFilters(ensembl)
+#View(filters)
+#mgi_symbol
+
+a <- getBM(attributes = c('mgi_symbol','ensembl_gene_id'),
+           filters = 'ensembl_gene_id',
+           values = countMatrix2$ensembl, 
+           mart = ensembl)
+
+zz <- join(a,countMatrix2,by ='ensembl_gene_id' )
+
+View(zz)
+#zz is the new RAW count matrix
+#need to clearn up before saving 
+#saving the count matrix to the general directory 
+
+setwd('/Users/anthony/Desktop/RNAseq/BenSandra RNAseq/Code&Data&Figures/DRG/')
+
+#now doing cleanup for DEseq2
+#getting rid of ensemblID column 
+zz$ensembl_gene_id <- NULL
+#making the rowname the gene symbol - dealing with unique names 
+rownames(zz) <- make.names(zz$mgi_symbol,unique = TRUE)
+#getting rid of mgi_symbol column
+zz$mgi_symbol <- NULL
+
+
+
+getwd()
+
+#saving RAW matrix before proceeding with DEseq analysis and normalization
+
+write.xlsx(zz,"RawCountMatrix_DRGs.xlsx", rowNames = TRUE)
+
+
+#saving coldata sheet to make everything more straightforward in the future 
+
+write.xlsx(colData, "drg_colData.xlsx")
+
 #making colData for each day 
-
-
 View(colData)
 colData4 <- colData[1:16,]
 colData7 <- colData[17:32,]
@@ -108,7 +220,7 @@ View(colData23)
 
 #making matrix for each day 
 #all day
-counts <- countMatrix2
+counts <- zz
 counts4 <- counts[,1:16]
 counts7 <- counts[,17:32]
 counts11 <- counts[,33:48]
@@ -190,6 +302,8 @@ vsd23 <- vst(dds23, blind = TRUE)
 ##############################################
 ##############################################
 
+
+#checking number of rows in the transformed data just for kicks and giggles
 nrow(rld)
 nrow(rld4)
 nrow(rld11)
@@ -209,7 +323,7 @@ nrow(vsd23)
 ##########################################
 ##########################################
 ##########################################
-###### PCA
+###### PCA [all treatments]
 ##########################################
 ##########################################
 ##########################################
@@ -228,14 +342,14 @@ plotPCA(rld23,intgroup = c("treatment"),ntop = 42180)
 
 #with VSD transformation
 plotPCA(vsd,intgroup = c("timepoint","treatment"))
-plotPCA(vsd4,intgroup = c("treatment"),ntop = 25841) +
-        geom_text(aes(label=name),vjust=2)
-plotPCA(vsd7,intgroup = c("treatment"),ntop = 25841) +
-        geom_text(aes(label=name),vjust=2)
-plotPCA(vsd11,intgroup = c("treatment"),ntop = 25841) +
-        geom_text(aes(label=name),vjust=2)
-plotPCA(vsd23,intgroup = c("treatment"),ntop = 25841) +
-        geom_text(aes(label=name),vjust=2)
+plotPCA(vsd4,intgroup = c("treatment"),ntop = 25841) #+
+        #geom_text(aes(label=name),vjust=2)
+plotPCA(vsd7,intgroup = c("treatment"),ntop = 25841) #+
+        #geom_text(aes(label=name),vjust=2)
+plotPCA(vsd11,intgroup = c("treatment"),ntop = 25841) #+
+        #geom_text(aes(label=name),vjust=2)
+plotPCA(vsd23,intgroup = c("treatment"),ntop = 25841) #+
+        #geom_text(aes(label=name),vjust=2)
 
 dev.off()
 
@@ -274,14 +388,14 @@ vsd23.sub <- vsd23[,vsd23$treatment %in% c("P&S","V&S")]
 
 #with VSD transformation
 plotPCA(vsd.sub,intgroup = c("timepoint","treatment"))
-plotPCA(vsd4.sub,intgroup = c("treatment"),ntop = 25841) +
-        geom_text(aes(label=name),vjust=2)
-plotPCA(vsd7.sub,intgroup = c("treatment"),ntop = 25841) +
-        geom_text(aes(label=name),vjust=5)
-plotPCA(vsd11.sub,intgroup = c("treatment"),ntop = 25841) +
-        geom_text(aes(label=name),vjust=2)
-plotPCA(vsd23.sub,intgroup = c("treatment"),ntop = 25841) +
-        geom_text(aes(label=name),vjust=2)
+plotPCA(vsd4.sub,intgroup = c("treatment"),ntop = 25841) #+
+        #geom_text(aes(label=name),vjust=2)
+plotPCA(vsd7.sub,intgroup = c("treatment"),ntop = 25841) #+
+        #geom_text(aes(label=name),vjust=5)
+plotPCA(vsd11.sub,intgroup = c("treatment"),ntop = 25841) #+
+        #geom_text(aes(label=name),vjust=2)
+plotPCA(vsd23.sub,intgroup = c("treatment"),ntop = 25841) #+
+        #geom_text(aes(label=name),vjust=2)
 
 dev.off()
 
@@ -381,7 +495,7 @@ dev.off()
 ##############################################
 ##############################################
 ##############################################
-
+View(colData)
 
 #normal - vst transformed 
 
@@ -460,7 +574,7 @@ dev.off()
 ##############################################
 ##############################################
 ##############################################
-#top 100 variably expressed genes
+#top 500 variably expressed genes
 ##############################################
 ##############################################
 ##############################################
@@ -900,7 +1014,7 @@ View(Zz)
 setwd("/Users/anthony/Desktop/RNAseq/BenSandra/Data&Figures_03242021/DRG/")
 
 
-AAA <- counts(dds, normalized = TRUE) #making count matrix
+AAA <- counts(dds, normalized = TRUE) #making normalized count matrix
 
 
 
@@ -939,16 +1053,9 @@ colnames(VC23) <- c("23day","23day","23day","23day")
 VC <- cbind(VC4,VC7,VC11,VC23) #here is our VC matrix
 View(VC)
 
-#only keep rows rows with sum >= 10
-#keep <- rowSums(VC) >= 10
-#VC <- VC[keep,]
-#view(VC)
-
-#make the column with the gene names all the way to the left
-#check number of rows
 nrow(VC)
 #write to .xlsx file 
-write.xlsx(VC, 'VC.xlsx', rowNames= TRUE)
+write.xlsx(VC, 'Vehicle+CL.xlsx', rowNames= TRUE)
 
 #keep this code for making tab delimited text files
 
@@ -972,13 +1079,10 @@ colnames(VS23) <- c("23day","23day","23day","23day")
 VS <- cbind(VS4,VS7,VS11,VS23) #here is our VC matrix
 View(VS)
 
-#make a column for the gene name 
-VS$Gene <- rownames(VS)
-nrow(VS)
 
-view(VS)
+
 #write to .xlsx file 
-write.xlsx(VS, 'VS.xlsx', rowNames= TRUE)
+write.xlsx(VS, 'Vehicle+Saline.xlsx', rowNames= TRUE)
 
 
 ############################################matrix for P&C
@@ -1008,7 +1112,7 @@ PC <- cbind(PC4,PC7,PC11,PC23) #here is our PC matrix
 nrow(PC)
 
 #write to .xlsx file 
-write.xlsx(PC,"PC.xlsx", rowNames = TRUE)
+write.xlsx(PC,"Paclitaxel+CL.xlsx", rowNames = TRUE)
 
 ############################################matrix for P&S
 PS4 <- AAA[,9:12] ################################4day column
@@ -1036,7 +1140,7 @@ PS <- cbind(PS4,PS7,PS11,PS23) #here is our PC matrix
 #check number of rows
 nrow(PS)
 #write to .xlsx file 
-write.xlsx(PS,"PS.xlsx", rowNames = TRUE)
+write.xlsx(PS,"Paclitaxel+Saline.xlsx", rowNames = TRUE)
 
 
 View(PS)
@@ -1056,11 +1160,6 @@ View(PS)
 ##############################################
 ##############################################
 
-#need to get some sort of results table to get rownames - for gene names
-res <- results(dds, tidy=TRUE, contrast=c("treatment", "P&S", "V&S")) %>%
-        arrange(padj, pvalue) %>%
-        tbl_df()
-
 #
 #
 #
@@ -1077,24 +1176,79 @@ res <- results(dds, tidy=TRUE, contrast=c("treatment", "P&S", "V&S")) %>%
 #
 #
 #
-goi <- c("Tubb5")
-tcounts <- t(log2((counts(dds[goi, ], normalized=TRUE, replaced=FALSE)+.5))) %>%
-        merge(colData(dds), ., by="row.names") %>%
-        gather(gene, expression, (ncol(.)-length(goi)+1):ncol(.))
+
+goi <- c("Ankrd27")
+tcounts <- t(counts(dds[goi, ], normalized=TRUE, replaced=FALSE)) %>%
+  merge(colData(dds), ., by="row.names") %>%
+  gather(gene, expression, (ncol(.)-length(goi)+1):ncol(.))
 #arranging variables 
-tcounts$timepoint <- factor(tcounts$timepoint, levels=c("d.4", "d.7", "d.11", "d.23"))
-tcounts$treatment <- factor(tcounts$treatment, levels=c("V&S", "P&S", "P&C","V&C"))
-ggplot(tcounts, aes(timepoint, expression, fill=treatment)) + 
-        geom_boxplot() + 
-        facet_wrap(~gene, scales="free_y") + 
-        labs(x="Timepoint", 
-             y="Expression (log normalized counts)", 
-             fill="Treatment" 
-             )
+tcounts$Timepoint <- factor(tcounts$timepoint, levels=c("4", "7", "11", "23"))
+#all treatments
+#tcounts$Treatment <- factor(tcounts$Treatment, levels=c("V&S", "P&S", "P&C"))
+#PCTX and VEH only 
+tcounts$treatment <- factor(tcounts$treatment, levels=c("V&S", "P&S"))
+
+tcounts
+
+
+#remove rows not included 
+tcounts <- tcounts[!is.na(tcounts$treatment), ]
+#convert timepoint into a factor
+#tcounts$Timepoint <- factor(tcounts$Timepoint)
+#statistical test
+stat.test <- tcounts %>% group_by(timepoint) %>% t_test(expression~treatment, alternative = "less" ) 
+stat.test <- stat.test %>% add_xy_position(x = "timepoint", dodge = 0.8)
+stat.test
+#plotting boxplot
+
+
+
+g<- ggboxplot(tcounts, x= "timepoint", y= "expression", 
+              add = "dotplot", title = goi, palette = 'npg',
+              ylab = "Expression (Normalized gene count)", legend = "None",
+              fill = "treatment",
+              xlab = "Timepoint (days)") +
+  theme(plot.title = element_text(hjust = 0.5))+
+  grids(linetype = "solid")+
+  stat_pvalue_manual(stat.test, label = "p",y.position = 3500, size = 8) +
+  scale_y_continuous(limits=c(0,max(tcounts$expression)*1.3))
+
+font <- 18
+g <- ggpar(g, 
+           font.main = font,
+           font.x = font,
+           font.y = font,
+           font.xtickslab = font, 
+           font.ytickslab = font)
+
+g 
 dev.off()
+
+
+pdf(file = 
+      "/Users/anthony/Desktop/RNAseq/BenSandra RNAseq/Code&Data&Figures/pctx vs vehicle validation genes/drgs/Ankrd27.pdf", # The directory you want to save the file in
+    width = 7, # The width of the plot in inches
+    height = 7) # The height of the plot in inches
+g
+dev.off()
+dev.off()
+dev.off()
+dev.off()
+dev.off()
+dev.off()
+dev.off()
+dev.off()
+
 
 ####
 ####
+####
+####
+####
+####
+
+
+
 #### making a catalog of ALL genes expression values 
 ####
 ####
